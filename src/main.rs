@@ -11,6 +11,10 @@ use std::env;
 use std::thread;
 use std::sync::mpsc;
 
+static REQUEST_BODY: &'static str =
+    "GET /metrics HTTP/1.1\r\n\
+    Content-Type: text/plain\r\n\
+    Host: threatmatrix.eng.fireeye.com\r\n\r\n";
 
 struct MetricsParser {
     lines: Vec<String>
@@ -18,10 +22,12 @@ struct MetricsParser {
 
 impl ParserHandler for MetricsParser {
     fn on_body(&mut self, s: &[u8]) -> bool {
-        let body = std::str::from_utf8(s).unwrap().to_string();
-        let lines: Vec<&str> = body.split("\n").collect();
-        for line in lines {
-            self.lines.push(line.to_string());
+        let body = std::str::from_utf8(s).ok().unwrap().to_string();
+        for line in body.lines() {
+            match line.parse::<String>() {
+                Ok(..) => self.lines.push(line.to_string()),
+                Err(..) => {}
+            }
         }
         true
     }
@@ -74,24 +80,17 @@ fn aggregate(directory: String, count: u8) {
     for _ in 0..count {
         let _ = rx.recv();
     }
+    println!("idk man");
 
 }
 
 fn poll_socket(path: String) {
-    let host = "threatmatrix.eng.fireeye.com";
-
     let mut metrics_parser = Parser::response(MetricsParser {
         lines: Vec::new()
     });
 
-    let metrics_request =  format!(
-        "GET /metrics HTTP/1.1\r\n\
-        Content-Type: text/plain\r\n\
-        Host: {host}\r\n\r\n",
-        host = &host);
-
-    let mut stream = UnixStream::connect(&path).unwrap();
-    stream.write_all(metrics_request.as_bytes()).unwrap();
+    let mut stream = UnixStream::connect(&path).ok().unwrap();
+    stream.write_all(REQUEST_BODY.as_bytes()).unwrap();
 
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
