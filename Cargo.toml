@@ -1,5 +1,5 @@
 [package]
-name = "metric_aggregate"
+name = "metrics_aggregate"
 version = "0.1.0"
 authors = ["Musee Ullah <musee.ullah@fireeye.com>"]
 description = """
