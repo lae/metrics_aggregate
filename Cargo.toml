@@ -1,0 +1,13 @@
+[package]
+name = "metric_aggregate"
+version = "0.1.0"
+authors = ["Musee Ullah <musee.ullah@fireeye.com>"]
+description = """
+Aggregate Prometheus /metrics endpoint over several Unix socket HTTP endpoints.
+"""
+
+[dependencies]
+unix_socket='*'
+regex='*'
+#hyper='*'
+http-muncher='*'
