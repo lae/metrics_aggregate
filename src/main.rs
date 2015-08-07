@@ -11,10 +11,11 @@ use std::env;
 use std::thread;
 use std::sync::mpsc;
 
-static REQUEST_BODY: &'static str =
-    "GET /metrics HTTP/1.1\r\n\
-    Content-Type: text/plain\r\n\
+static REQUEST_BODY: &'static [u8] =
+    b"GET /metrics HTTP/1.1\r\n\
+    Connection: close\r\n\
     Host: threatmatrix.eng.fireeye.com\r\n\r\n";
+
 
 struct MetricsParser {
     lines: Vec<String>
@@ -32,18 +33,16 @@ impl ParserHandler for MetricsParser {
         true
     }
 }
-/*
+
 struct MetricHistogram {
     desc_help: String,
     desc_type: String,
 }
 
-struct something;
-
-
 struct Counter {
     value: f64,
-}*/
+}
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -89,8 +88,8 @@ fn poll_socket(path: String) {
         lines: Vec::new()
     });
 
-    let mut stream = UnixStream::connect(&path).ok().unwrap();
-    stream.write_all(REQUEST_BODY.as_bytes()).unwrap();
+    let mut stream = UnixStream::connect(&path).unwrap();
+    let _ = stream.write(REQUEST_BODY).unwrap();
 
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
@@ -104,5 +103,4 @@ fn poll_socket(path: String) {
         path = path,
         first_line = metrics[0]
     );
-
 }
