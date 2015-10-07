@@ -1,6 +1,8 @@
 extern crate unix_socket;
 extern crate core_mini_http;
 extern crate chunked_transfer;
+#[macro_use]
+extern crate nom;
 
 use unix_socket::UnixStream;
 use core_mini_http::*;
@@ -12,6 +14,9 @@ use std::env;
 use std::path::Path;
 use std::thread;
 use std::sync::mpsc;
+
+mod nom_parsers;
+use nom_parsers::parse;
 
 static REQUEST_BODY: &'static [u8] =
     b"GET /metrics HTTP/1.1\r\n\
@@ -47,9 +52,12 @@ fn aggregate(directory: &str, count: u8) {
         let path = validate_socket_path(directory, socket_number).ok().unwrap();
         let tx = tx.clone();
         thread::spawn(move || {
-            let metrics = get_metrics_from_path(&path);
+            let metrics = get_metrics_from_socket(&path);
             match metrics {
-                Ok(_) => println!("{}, good", path),
+                Ok(m) => {
+                    parse(m.as_bytes());
+                    //println!("{}", m),
+                },
                 Err(e) => println!("{}, {:?}", path, e)
             }
             let _ = tx.send(());
@@ -62,8 +70,8 @@ fn aggregate(directory: &str, count: u8) {
     println!("whee whoo");
 }
 
-fn get_metrics_from_path(path: &str) -> std::io::Result<String> {
-    let mut conn = match UnixStream::connect(path) {
+fn get_metrics_from_socket(socket: &str) -> std::io::Result<String> {
+    let mut conn = match UnixStream::connect(socket) {
         Ok(conn) => conn,
         Err(e) => return Err(e)
     };
