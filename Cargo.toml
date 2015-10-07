@@ -7,7 +7,12 @@ Aggregate Prometheus /metrics endpoint over several Unix socket HTTP endpoints.
 """
 
 [dependencies]
-unix_socket='*'
-regex='*'
+unix_socket = '0.4.5'
+core_mini_http = { git = "https://github.com/hashmismatch/core_mini_http.rs" }
+chunked_transfer = '0.3.1'
+#regex='*'
 #hyper='*'
-http-muncher='*'
+#httparse='*'
+#http-muncher='*'
+#iron='*'
+#bodyparser='*'

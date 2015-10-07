@@ -1,13 +1,15 @@
 extern crate unix_socket;
-extern crate http_muncher;
-extern crate regex;
+extern crate core_mini_http;
+extern crate chunked_transfer;
 
 use unix_socket::UnixStream;
-use http_muncher::{Parser, ParserHandler};
-//use regex::Regex;
+use core_mini_http::*;
+use chunked_transfer::Decoder as ChunkedResponseDecoder;
 
+use std::process;
 use std::io::prelude::*;
 use std::env;
+use std::path::Path;
 use std::thread;
 use std::sync::mpsc;
 
@@ -17,61 +19,39 @@ static REQUEST_BODY: &'static [u8] =
     Host: threatmatrix.eng.fireeye.com\r\n\r\n";
 
 
-struct MetricsParser {
-    lines: Vec<String>
-}
-
-impl ParserHandler for MetricsParser {
-    fn on_body(&mut self, s: &[u8]) -> bool {
-        let body = std::str::from_utf8(s).ok().unwrap().to_string();
-        for line in body.lines() {
-            match line.parse::<String>() {
-                Ok(..) => self.lines.push(line.to_string()),
-                Err(..) => {}
-            }
-        }
-        true
-    }
-}
-
-struct MetricHistogram {
-    desc_help: String,
-    desc_type: String,
-}
-
-struct Counter {
-    value: f64,
-}
-
-
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let args = env::args().collect::<Vec<String>>();
     if args.len() != 3 {
         println!(
             "{} [socket directory] [socket count]",
-            args[0]
+            &args[0]
         );
+        process::exit(1);
     }
-    else {
-        let socket_dir = args[1].parse().unwrap();
-        let socket_count: u8 = args[2].parse().unwrap();
-        aggregate(socket_dir, socket_count);
-    }
+    let socket_dir = args[1].to_string();
+    let socket_count: u8 = match args[2].parse::<u8>() {
+        Ok(c) => c,
+        Err(_) => {
+            println!("Socket count must be a number (given: {}).", &args[2]);
+            process::exit(1);
+        }
+    };
+    aggregate(&socket_dir, socket_count);
 }
 
-fn aggregate(directory: String, count: u8) {
+fn aggregate(directory: &str, count: u8) {
     println!("directory: {}\nsocket count: {}", directory, count);
     let (tx, rx) = mpsc::channel();
 
     for socket_number in 0..count {
-        let socket_path = format!(
-            "{}/{}.socket",
-            directory,
-            socket_number
-        ).to_string();
+        let path = validate_socket_path(directory, socket_number).ok().unwrap();
         let tx = tx.clone();
         thread::spawn(move || {
-            poll_socket(socket_path);
+            let metrics = get_metrics_from_path(&path);
+            match metrics {
+                Ok(_) => println!("{}, good", path),
+                Err(e) => println!("{}, {:?}", path, e)
+            }
             let _ = tx.send(());
         });
     }
@@ -79,28 +59,72 @@ fn aggregate(directory: String, count: u8) {
     for _ in 0..count {
         let _ = rx.recv();
     }
-    println!("idk man");
-
+    println!("whee whoo");
 }
 
-fn poll_socket(path: String) {
-    let mut metrics_parser = Parser::response(MetricsParser {
-        lines: Vec::new()
-    });
+fn get_metrics_from_path(path: &str) -> std::io::Result<String> {
+    let mut conn = match UnixStream::connect(path) {
+        Ok(conn) => conn,
+        Err(e) => return Err(e)
+    };
+    try!(conn.write_all(REQUEST_BODY));
 
-    let mut stream = UnixStream::connect(&path).unwrap();
-    let _ = stream.write(REQUEST_BODY).unwrap();
+    // parse the response in batches...
+    let mut parser = HttpParser::new_response();
+    loop {
+        let mut buf = [0; 65536];
+        let read_bytes = try!(conn.read(&mut buf));
+        if read_bytes == 0 {
+            // ...until nothing's left to parse
+            break;
+        }
+        /*
+            this function probably needs to be refactored a bit to not use
+            std::io::Result, or handle the following error and the error type
+            from to_vec further below differently. no panic plz
+        */
+        match parser.parse_bytes(&buf[..read_bytes]) {
+            Ok(_) => continue,
+            Err(_) => panic!("fuck")
+        }
+        if parser.read_how_many_bytes() == 0 {
+            break;
+        }
+    }
 
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
+    let http_msg = parser.get_response().unwrap();
+    if http_msg.headers["Transfer-Encoding"] == "chunked" {
+        // Now we want to parse out the chunk metadata here basically
+        let mut response = String::new();
+        let mut decoder = ChunkedResponseDecoder::new(&http_msg.body[..]);
+        try!(decoder.read_to_string(&mut response));
+        Ok(response)
+    } else {
+        // Otherwise just return the body as a string as-is
+        let response = match String::from_utf8(http_msg.body.to_vec()) {
+            Ok(s) => s,
+            Err(_) => panic!("fuck")
+        };
+        Ok(response)
+    }
+}
 
-    metrics_parser.parse(response.as_bytes());
-
-    let ref metrics = metrics_parser.get().lines;
-
-    println!(
-        "path={path} first_line={first_line:?}",
-        path = path,
-        first_line = metrics[0]
-    );
+fn validate_socket_path(dir: &str, num: u8) -> Result<String, String> {
+    // This only gives us a relatively clean path string, for now
+    let path = Path::new(dir).join(format!("{}.socket", num)).to_str()
+                            .unwrap_or("").to_string();
+    /*
+    // TODO: use FileTypeExt::is_socket() instead for earlier termination when
+    // its API is stable. (https://doc.rust-lang.org/stable/std/os/unix/fs/trait.FileTypeExt.html)
+    let path_metadata = match fs::metadata(&path) {
+        Ok(md) => md,
+        Err(e) => return Err(e.to_string())
+    };
+    if path_metadata.file_type().is_socket() {
+        Ok(path)
+    } else {
+        Err(format!("{} isn't a socket.", path))
+    }
+    */
+    Ok(path)
 }
