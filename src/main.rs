@@ -67,7 +67,6 @@ fn aggregate(directory: &str, count: u8) {
     for _ in 0..count {
         let _ = rx.recv();
     }
-    println!("whee whoo");
 }
 
 fn get_metrics_from_socket(socket: &str) -> std::io::Result<String> {
